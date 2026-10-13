@@ -2,22 +2,33 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Alathur Panchayat Live Map</title>
 
     <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- GeoJSON Data for Labels & Highlighting -->
+    <!-- GeoJSON Data for Labels & Highlighting (leaflet-pip) -->
     <script src="https://unpkg.com/leaflet-pip@latest/leaflet-pip.js"></script>
 
     <!-- 3D Buildings Plugin (OSMBuildings) -->
     <script src="https://cdn.osmbuildings.org/classic/0.2.2b/OSMBuildings-Leaflet.js"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
-        #map { width: 100%; height: 100vh; }
+        body, html { 
+            margin: 0; padding: 0; font-family: Arial, sans-serif; 
+            width: 100%; height: 100%; overflow: hidden; 
+        }
+        
+        /* മാപ്പ് തിരിയുമ്പോൾ സ്ക്രീനിൽ കൃത്യമായി നിൽക്കാൻ ഒരു കവർ നൽകുന്നു */
+        #map-wrapper { 
+            width: 100%; height: 100vh; position: relative; overflow: hidden; 
+        }
+        #map { 
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0; 
+            transition: transform 0.2s ease-out; 
+        }
         
         .locate-btn {
             position: absolute;
@@ -55,6 +66,7 @@
             height: 25px;
         }
 
+        /* വാർഡ് പേരുകൾ മഞ്ഞ നിറത്തിൽ */
         .ward-label {
             background: transparent;
             border: none;
@@ -65,31 +77,19 @@
             text-align: center;
             text-shadow: 1px 1px 3px black, -1px -1px 3px black, 1px -1px 3px black, -1px 1px 3px black;
             white-space: nowrap;
+            transition: transform 0.2s ease-out;
         }
 
+        /* ഗൂഗിൾ മാപ്പിലേത് പോലെയുള്ള ലൈവ് ബ്ലൂ ഷാഡോ */
         .custom-user-marker {
             background: transparent;
             border: none;
         }
-        
         .marker-container {
             position: relative;
             width: 16px;
             height: 16px;
-            transition: transform 0.2s ease-out;
         }
-        
-        .direction-arrow {
-            position: absolute;
-            top: -12px;
-            left: 2px;
-            width: 0;
-            height: 0;
-            border-left: 6px solid transparent;
-            border-right: 6px solid transparent;
-            border-bottom: 12px solid #0056b3;
-        }
-        
         .pulsing-dot {
             width: 16px;
             height: 16px;
@@ -101,7 +101,6 @@
             top: 0;
             left: 0;
         }
-        
         .pulsing-dot::after {
             content: "";
             position: absolute;
@@ -121,16 +120,21 @@
 </head>
 <body>
 
+    <!-- മാപ്പ് ഏരിയ -->
+    <div id="map-wrapper">
+        <div id="map"></div>
+    </div>
+
+    <!-- ലൊക്കേഷൻ ബട്ടൺ -->
     <button class="locate-btn" onclick="locateUser()">📍 Live Location</button>
     
     <!-- നോർത്ത് കോമ്പസ് -->
     <div id="compass" class="compass-icon">
-        <img src="https://cdn-icons-png.flaticon.com/512/73/73215.png" alt="Compass">
+        <img src="https://cdn-icons-png.flaticon.com/512/73/73215.png" alt="North">
     </div>
 
-    <div id="map"></div>
-
     <script>
+        // 1. ബേസ് മാപ്പുകൾ
         var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap'
         });
@@ -144,27 +148,33 @@
         var map = L.map('map', {
             center: [10.64, 76.55],
             zoom: 13,
-            layers: [googleSat] 
+            layers: [googleSat],
+            zoomControl: false // ലൊക്കേഷൻ ബട്ടണിന് സ്ഥലം നൽകാൻ
         });
+        
+        // Zoom control വലതുവശത്തേക്ക് താഴേക്ക് മാറ്റുന്നു
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // 3D Raised Buildings ലോഡ് ചെയ്യുന്നു (OSM ഡാറ്റ ഉപയോഗിച്ച്)
+        // 2. 3D Raised Buildings ലോഡ് ചെയ്യുന്നു (OSM ഡാറ്റ)
         var osmb = new OSMBuildings(map).load('https://{s}.data.osmbuildings.org/0.2/anonymous/tile/{z}/{x}/{y}.json');
 
-        // ലെയർ കൺട്രോളിൽ 3D ബിൽഡിംഗ്സ് കൂടി ചേർത്തു
+        // ലെയർ കൺട്രോളിൽ 3D ബിൽഡിംഗ്സ് ഉൾപ്പെടുത്തുന്നു
         L.control.layers({
             "Satellite (Google)": googleSat,
             "Default Map (OSM)": osmLayer
         }, {
-            "3D Raised Buildings": osmb
+            "Raised Buildings (3D)": osmb
         }).addTo(map);
 
         var userMarker, userCircle, wardLayer;
         var highlightedLayer = null;
         var isFollowingUser = false; // മാപ്പ് യൂസറിനൊപ്പം നീങ്ങാൻ വേണ്ടിയുള്ള ഫ്ലാഗ്
 
+        // വാർഡ് അതിർത്തികളുടെ നിറം
         var defaultStyle = { color: "#ff0000", weight: 2, fillColor: "#ff0000", fillOpacity: 0.05 };
         var highlightStyle = { color: "#0000ff", weight: 4, fillColor: "#4285F4", fillOpacity: 0.3 };
 
+        // 3. വാർഡ് ഡാറ്റയും ലേബലുകളും ചേർക്കുന്നു
         fetch('Alathur_Wards_2025_Final.geojson')
             .then(response => response.json())
             .then(data => {
@@ -176,6 +186,7 @@
                         var labelText = wardNo ? `${wardNo} - ${wardName}` : wardName;
                         layer.bindPopup(`<b>Ward:</b> ${labelText}`);
                         
+                        // ഇംഗ്ലീഷിൽ വാർഡ് പേരുകൾ ലേബലായി നൽകുന്നു
                         if(labelText) {
                             var center = layer.getBounds().getCenter();
                             L.marker(center, {
@@ -190,24 +201,35 @@
 
         var userIcon = L.divIcon({
             className: 'custom-user-marker',
-            html: '<div id="user-marker-container" class="marker-container"><div class="direction-arrow"></div><div class="pulsing-dot"></div></div>',
+            html: '<div id="user-marker-container" class="marker-container"><div class="pulsing-dot"></div></div>',
             iconSize: [16, 16], iconAnchor: [8, 8]
         });
 
+        // 4. ദിശ മാറ്റുന്ന ഫംഗ്ഷൻ (Device Orientation)
         function updateHeading(heading) {
-            // 1. നീല മാർക്കറിലെ അമ്പടയാളം യൂസർ നോക്കുന്ന ദിശയിലേക്ക് തിരിക്കുന്നു
-            var container = document.getElementById('user-marker-container');
-            if (container) {
-                container.style.transform = 'rotate(' + heading + 'deg)';
-            }
-            
-            // 2. സ്ക്രീനിലെ നോർത്ത് കോമ്പസ് എപ്പോഴും വടക്കോട്ട് (North) തിരിഞ്ഞു നിൽക്കാൻ
+            // സ്ക്രീനിലെ നോർത്ത് കോമ്പസ് എപ്പോഴും വടക്കോട്ട് തിരിഞ്ഞു നിൽക്കാൻ
             var compass = document.getElementById('compass');
             if (compass) {
                 compass.style.transform = 'rotate(' + (-heading) + 'deg)';
             }
+
+            // യൂസർ തിരിയുന്നതിനനുസരിച്ച് മാപ്പ് മുഴുവനായി തിരിയാൻ (ഗൂഗിൾ മാപ്പിലേതുപോലെ)
+            if (isFollowingUser) {
+                var mapContainer = document.getElementById('map');
+                if (mapContainer) {
+                    mapContainer.style.transform = 'rotate(' + heading + 'deg)';
+                    mapContainer.style.transformOrigin = 'center center';
+                }
+                
+                // മാപ്പ് തിരിയുമ്പോൾ അതിലെ ടെക്സ്റ്റുകൾ (വാർഡ് ലേബലുകൾ) തലകീഴായി പോകാതിരിക്കാൻ
+                var markers = document.querySelectorAll('.ward-label');
+                markers.forEach(function(marker) {
+                    marker.style.transform = 'rotate(' + (-heading) + 'deg)';
+                });
+            }
         }
 
+        // ഫോണിലെ സെൻസർ ഉപയോഗിച്ച് ദിശ കണ്ടെത്തുന്നു
         if (window.DeviceOrientationEvent) {
             window.addEventListener('deviceorientationabsolute', function(event) {
                 if (event.alpha !== null) updateHeading(360 - event.alpha);
@@ -218,34 +240,52 @@
             });
         }
 
+        // 5. ലൈവ് ലൊക്കേഷൻ ബട്ടൺ അമർത്തുമ്പോൾ
         function locateUser() {
-            isFollowingUser = true; // ബട്ടൺ അമർത്തുമ്പോൾ മാപ്പ് യൂസറിനെ ഫോളോ ചെയ്യാൻ തുടങ്ങും
+            isFollowingUser = true; // ബട്ടൺ അമർത്തുമ്പോൾ മാപ്പ് യൂസറിനെ ഫോളോ ചെയ്യാനും കറങ്ങാനും തുടങ്ങും
+            
             map.locate({
                 setView: false, 
-                maxZoom: 18, 
+                maxZoom: 20, 
                 enableHighAccuracy: true, 
                 watch: true,
                 maximumAge: 0,
                 timeout: 10000 
             });
+            
+            // 3D ബിൽഡിംഗ്സ് കാണാൻ തക്കവണ്ണം സൂം ചെയ്ത് വെക്കുന്നു (Zoom 18)
             if(userMarker){
-                map.setView(userMarker.getLatLng(), 17);
+                map.setView(userMarker.getLatLng(), 18); 
             }
         }
 
-        // യൂസർ വിരൽ വെച്ച് മാപ്പ് സ്വൈപ്പ് ചെയ്താൽ ആ സമയത്ത് മാപ്പ് തനിയെ നീങ്ങുന്നത് നിർത്താൻ
+        // യൂസർ വിരൽ വെച്ച് മാപ്പ് സ്വൈപ്പ് ചെയ്താൽ ആ സമയത്ത് മാപ്പ് തിരിയുന്നതും നീങ്ങുന്നതും താൽക്കാലികമായി നിർത്താൻ
         map.on('dragstart', function() {
             isFollowingUser = false;
+            
+            // മാപ്പ് തിരിയുന്നത് പഴയപടിയാക്കാൻ
+            var mapContainer = document.getElementById('map');
+            if(mapContainer) {
+                mapContainer.style.transform = 'rotate(0deg)';
+            }
+            
+            // ഐക്കണുകളും ടെക്സ്റ്റുകളും പഴയപടിയാക്കാൻ
+            var markers = document.querySelectorAll('.ward-label');
+            markers.forEach(function(marker) {
+                marker.style.transform = 'rotate(0deg)';
+            });
         });
 
+        // 6. ലൊക്കേഷൻ മാറുമ്പോൾ (GPS Update)
         map.on('locationfound', function(e) {
             var radius = e.accuracy / 2;
             
-            // മാപ്പ് തനിയെ അഡ്ജസ്റ്റ് ആകാൻ (Auto-Panning)
+            // മാപ്പ് യൂസറുടെ കൂടെ തനിയെ നീങ്ങാൻ (Auto-Panning)
             if (isFollowingUser) {
-                map.panTo(e.latlng);
+                map.panTo(e.latlng, {animate: true, duration: 0.5});
             }
 
+            // ബ്ലൂ മാർക്കർ ലൊക്കേഷനിലേക്ക് മാറ്റുന്നു
             if (userMarker) {
                 userMarker.setLatLng(e.latlng);
                 if (userCircle) {
@@ -259,14 +299,15 @@
                 }).addTo(map);
                 
                 // ആദ്യത്തെ തവണ ലൊക്കേഷൻ കിട്ടുമ്പോൾ അവിടേക്ക് ഫോക്കസ് ചെയ്യുക
-                if (isFollowingUser) map.setView(e.latlng, 17);
+                if (isFollowingUser) map.setView(e.latlng, 18);
             }
 
+            // നടക്കുമ്പോൾ/വണ്ടിയിൽ പോകുമ്പോൾ ലഭിക്കുന്ന GPS Heading എടുക്കാൻ
             if (e.heading) {
                 updateHeading(e.heading);
             }
 
-            // വാർഡ് ഹൈലൈറ്റിംഗ്
+            // വാർഡ് ഹൈലൈറ്റിംഗ് ഫീച്ചർ
             if (wardLayer) {
                 if (highlightedLayer) {
                     wardLayer.resetStyle(highlightedLayer);
