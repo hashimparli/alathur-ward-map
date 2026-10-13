@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alathur Panchayat Live Map</title>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- GeoJSON Data for Labels & Highlighting -->
+    <script src="https://unpkg.com/leaflet-pip@latest/leaflet-pip.js"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { width: 100%; height: 100vh; }
+        
+        .locate-btn {
+            position: absolute;
+            top: 20px;
+            left: 50px;
+            z-index: 1000;
+            padding: 12px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        /* വാർഡ് പേരുകൾ മഞ്ഞ നിറത്തിൽ ആക്കാനുള്ള സ്റ്റൈൽ */
+        .ward-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            font-weight: bold;
+            color: #FFFF00; /* Yellow color */
+            font-size: 13px; /* അല്പം വലുതാക്കി */
+            text-align: center;
+            /* മഞ്ഞ നിറം മാപ്പിൽ വ്യക്തമായി കാണാൻ ചുറ്റും കറുപ്പ് ഷാഡോ നൽകുന്നു */
+            text-shadow: 1px 1px 3px black, -1px -1px 3px black, 1px -1px 3px black, -1px 1px 3px black;
+            white-space: nowrap;
+        }
+
+        /* ഗൂഗിൾ മാപ്പിലേത് പോലെയുള്ള ലൈവ് ബ്ലൂ ഷാഡോയും ദിശ കാണിക്കുന്ന അമ്പടയാളവും */
+        .custom-user-marker {
+            background: transparent;
+            border: none;
+        }
+        
+        .marker-container {
+            position: relative;
+            width: 16px;
+            height: 16px;
+            transition: transform 0.2s ease-out;
+        }
+        
+        .direction-arrow {
+            position: absolute;
+            top: -12px;
+            left: 2px;
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid #0056b3;
+        }
+        
+        .pulsing-dot {
+            width: 16px;
+            height: 16px;
+            background-color: #4285F4;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        .pulsing-dot::after {
+            content: "";
+            position: absolute;
+            top: -17px;
+            left: -17px;
+            width: 50px;
+            height: 50px;
+            background-color: rgba(66, 133, 244, 0.4);
+            border-radius: 50%;
+            animation: pulse 2s infinite ease-out;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.3); opacity: 1; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <button class="locate-btn" onclick="locateUser()">📍 Live Location</button>
+    <div id="map"></div>
+
+    <script>
+        var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        });
+
+        var googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+            maxZoom: 20,
+            subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+            attribution: '&copy; Google Maps'
+        });
+
+        var map = L.map('map', {
+            center: [10.64, 76.55],
+            zoom: 13,
+            layers: [googleSat] 
+        });
+
+        L.control.layers({
+            "Satellite (Google)": googleSat,
+            "Default Map (OSM)": osmLayer
+        }).addTo(map);
+
+        var userMarker, userCircle, wardLayer;
+        var highlightedLayer = null;
+
+        var defaultStyle = {
+            color: "#ff0000",
+            weight: 2,
+            fillColor: "#ff0000",
+            fillOpacity: 0.05
+        };
+
+        var highlightStyle = {
+            color: "#0000ff",
+            weight: 4,
+            fillColor: "#4285F4",
+            fillOpacity: 0.3
+        };
+
+        fetch('Alathur_Wards_2025_Final.geojson')
+            .then(response => response.json())
+            .then(data => {
+                wardLayer = L.geoJSON(data, {
+                    style: function (feature) {
+                        return defaultStyle;
+                    },
+                    onEachFeature: function (feature, layer) {
+                        var wardName = feature.properties.name_en || feature.properties.Ward_Name || "";
+                        var wardNo = feature.properties.ward_no || feature.properties.Ward_No || "";
+                        var labelText = wardNo ? `${wardNo} - ${wardName}` : wardName;
+
+                        layer.bindPopup(`<b>Ward:</b> ${labelText}`);
+                        
+                        if(labelText) {
+                            var center = layer.getBounds().getCenter();
+                            L.marker(center, {
+                                icon: L.divIcon({
+                                    className: 'ward-label',
+                                    html: labelText,
+                                    iconSize: [100, 20]
+                                }),
+                                interactive: false
+                            }).addTo(map);
+                        }
+                    }
+                }).addTo(map);
+            })
+            .catch(err => console.error("GeoJSON Error:", err));
+
+        var userIcon = L.divIcon({
+            className: 'custom-user-marker',
+            html: '<div id="user-marker-container" class="marker-container"><div class="direction-arrow"></div><div class="pulsing-dot"></div></div>',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+
+        function updateHeading(heading) {
+            var container = document.getElementById('user-marker-container');
+            if (container) {
+                container.style.transform = 'rotate(' + heading + 'deg)';
+            }
+        }
+
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientationabsolute', function(event) {
+                if (event.alpha !== null) updateHeading(360 - event.alpha);
+            });
+            window.addEventListener('deviceorientation', function(event) {
+                if (event.webkitCompassHeading) updateHeading(event.webkitCompassHeading);
+                else if (event.absolute && event.alpha !== null) updateHeading(360 - event.alpha);
+            });
+        }
+
+        var isFirstLocation = true;
+        
+        function locateUser() {
+            // മൊബൈലിൽ എപ്പോഴും പുതിയ ലൊക്കേഷൻ എടുക്കാൻ maximumAge: 0, timeout: 10000 നൽകി
+            map.locate({
+                setView: false, 
+                maxZoom: 18, 
+                enableHighAccuracy: true, 
+                watch: true,
+                maximumAge: 0,
+                timeout: 10000 
+            });
+            
+            if(!isFirstLocation && userMarker){
+                map.setView(userMarker.getLatLng(), 16);
+            }
+        }
+
+        map.on('locationfound', function(e) {
+            var radius = e.accuracy / 2;
+            
+            if (isFirstLocation) {
+                map.setView(e.latlng, 16);
+                isFirstLocation = false;
+            }
+
+            if (userMarker) {
+                userMarker.setLatLng(e.latlng);
+                if (userCircle) {
+                    userCircle.setLatLng(e.latlng);
+                    userCircle.setRadius(radius);
+                }
+            } else {
+                userMarker = L.marker(e.latlng, {icon: userIcon, zIndexOffset: 1000}).addTo(map);
+                userCircle = L.circle(e.latlng, radius, {
+                    color: '#4285F4', fillColor: '#4285F4', fillOpacity: 0.15, weight: 1
+                }).addTo(map);
+            }
+
+            if (e.heading) {
+                updateHeading(e.heading);
+            }
+
+            if (wardLayer) {
+                if (highlightedLayer) {
+                    wardLayer.resetStyle(highlightedLayer);
+                    highlightedLayer = null;
+                }
+
+                var pointInfo = leafletPip.pointInLayer(e.latlng, wardLayer);
+                if (pointInfo && pointInfo.length > 0) {
+                    highlightedLayer = pointInfo[0];
+                    highlightedLayer.setStyle(highlightStyle);
+                    highlightedLayer.bringToFront(); 
+                }
+            }
+        });
+
+        map.on('locationerror', function(e) {
+            alert("ലൊക്കേഷൻ കണ്ടെത്താനായില്ല. GPS ഓൺ ആണോ എന്ന് പരിശോധിക്കുക.");
+        });
+    </script>
+</body>
+</html>
