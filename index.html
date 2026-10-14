@@ -22,7 +22,7 @@
         body, html { 
             margin: 0; padding: 0; font-family: Arial, sans-serif; 
             width: 100%; height: 100%; overflow: hidden; 
-            background: #e5e3df; /* മാപ്പിന്റെ ബാക്ക്ഗ്രൗണ്ട് നിറം */
+            background: #e5e3df; 
         }
         
         #map { 
@@ -66,7 +66,6 @@
             height: 25px;
         }
 
-        /* വാർഡ് പേരുകൾ മഞ്ഞ നിറത്തിൽ */
         .ward-label {
             background: transparent;
             border: none;
@@ -88,6 +87,22 @@
             width: 16px;
             height: 16px;
         }
+        
+        /* ഗൂഗിൾ മാപ്പിലേത് പോലെയുള്ള നീല അമ്പടയാളം */
+        .direction-arrow {
+            position: absolute;
+            top: -14px;
+            left: 2px;
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 14px solid #4285F4;
+            transform-origin: 6px 22px; 
+            transition: transform 0.2s ease-out;
+            z-index: 10;
+        }
+
         .pulsing-dot {
             width: 16px;
             height: 16px;
@@ -98,6 +113,7 @@
             position: absolute;
             top: 0;
             left: 0;
+            z-index: 1;
         }
         .pulsing-dot::after {
             content: "";
@@ -122,7 +138,6 @@
     
     <button class="locate-btn" onclick="locateUser()">📍 Live Location</button>
     
-    <!-- കോമ്പസിൽ ക്ലിക്ക് ചെയ്താൽ മാപ്പ് പഴയതുപോലെ നേരെയാകാൻ resetNorth() നൽകി -->
     <div id="compass" class="compass-icon" onclick="resetNorth()">
         <img src="https://cdn-icons-png.flaticon.com/512/73/73215.png" alt="North">
     </div>
@@ -138,7 +153,6 @@
             attribution: '&copy; Google Maps'
         });
 
-        // rotate: true നൽകി പ്ലഗിൻ ആക്ടീവ് ആക്കുന്നു
         var map = L.map('map', {
             center: [10.64, 76.55],
             zoom: 13,
@@ -162,6 +176,7 @@
         var userMarker, userCircle, wardLayer;
         var highlightedLayer = null;
         var isFollowingUser = false; 
+        var lastHeading = 0; // അവസാനം ലഭിച്ച ദിശ സേവ് ചെയ്യാൻ
 
         var defaultStyle = { color: "#ff0000", weight: 2, fillColor: "#ff0000", fillOpacity: 0.05 };
         var highlightStyle = { color: "#0000ff", weight: 4, fillColor: "#4285F4", fillOpacity: 0.3 };
@@ -189,31 +204,58 @@
             })
             .catch(err => console.error("GeoJSON Error:", err));
 
+        // നീല അമ്പടയാളം ചേർത്തുള്ള പുതിയ മാർക്കർ
         var userIcon = L.divIcon({
             className: 'custom-user-marker',
-            html: '<div id="user-marker-container" class="marker-container"><div class="pulsing-dot"></div></div>',
+            html: '<div class="marker-container"><div id="direction-arrow" class="direction-arrow"></div><div class="pulsing-dot"></div></div>',
             iconSize: [16, 16], iconAnchor: [8, 8]
         });
 
-        function updateHeading(heading) {
+        // ഏറ്റവും പ്രധാനപ്പെട്ട ദിശ തിരിക്കുന്ന ഫംഗ്ഷൻ (Direction logic fixed)
+        function updateDirection(heading) {
+            if (heading === null || heading === undefined) return;
+            
+            // ഫോൺ ലാൻഡ്സ്കേപ്പിൽ ആണെങ്കിൽ അതുകൂടി പരിഗണിക്കാൻ
+            var screenOrientation = (window.screen && window.screen.orientation) ? window.screen.orientation.angle : (window.orientation || 0);
+            var trueHeading = (heading + screenOrientation) % 360;
+            lastHeading = trueHeading;
+
+            // കോമ്പസ് ഐക്കൺ തിരിക്കാൻ
             var compass = document.getElementById('compass');
             if (compass) {
-                compass.style.transform = 'rotate(' + (-heading) + 'deg)';
+                compass.style.transform = 'rotate(' + (-trueHeading) + 'deg)';
             }
 
+            var arrow = document.getElementById('direction-arrow');
+
             if (isFollowingUser) {
-                // പ്ലഗിൻ വഴി മാപ്പ് തിരിക്കുന്നു
-                map.setBearing(heading);
+                // ഗൂഗിൾ മാപ്പ് പോലെ ഫോണിന് മുൻപിലുള്ളത് സ്ക്രീനിന്റെ മുകളിൽ വരാൻ
+                // മാപ്പ് എതിർദിശയിൽ (360 - trueHeading) തിരിയണം
+                map.setBearing(360 - trueHeading); 
+                
+                // മാപ്പ് തിരിയുമ്പോൾ അമ്പടയാളം സ്ക്രീനിന്റെ നേരെ മുകളിലേക്ക് തന്നെ നിൽക്കണം
+                if (arrow) arrow.style.transform = 'rotate(0deg)';
+            } else {
+                // മാപ്പ് തിരിയുന്നില്ലെങ്കിൽ, അമ്പടയാളം യൂസർ നോക്കുന്ന ദിശയിലേക്ക് തിരിയണം
+                var currentMapBearing = map.getBearing() || 0;
+                var arrowAngle = (trueHeading + currentMapBearing) % 360;
+                if (arrow) arrow.style.transform = 'rotate(' + arrowAngle + 'deg)';
             }
         }
 
+        // ഫോൺ സെൻസറുകൾ വഴി ദിശ കണ്ടെത്തുന്നു
         if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientationabsolute', function(event) {
-                if (event.alpha !== null) updateHeading(360 - event.alpha);
-            });
             window.addEventListener('deviceorientation', function(event) {
-                if (event.webkitCompassHeading) updateHeading(event.webkitCompassHeading);
-                else if (event.absolute && event.alpha !== null) updateHeading(360 - event.alpha);
+                if (event.webkitCompassHeading) {
+                    updateDirection(event.webkitCompassHeading); // iOS
+                } else if (event.absolute && event.alpha !== null) {
+                    updateDirection(360 - event.alpha); // Android
+                }
+            });
+            window.addEventListener('deviceorientationabsolute', function(event) {
+                if (event.alpha !== null) {
+                    updateDirection(360 - event.alpha); // Android (Absolute)
+                }
             });
         }
 
@@ -240,10 +282,13 @@
             map.setBearing(0);
             var compass = document.getElementById('compass');
             if (compass) compass.style.transform = 'rotate(0deg)';
+            updateDirection(lastHeading); // അമ്പടയാളം ശരിയാക്കാൻ
         }
 
+        // വിരൽ വെച്ച് നീക്കുമ്പോൾ മാപ്പ് തിരിയുന്നത് നിൽക്കാൻ
         map.on('dragstart', function() {
             isFollowingUser = false;
+            updateDirection(lastHeading); // അമ്പടയാളം ശരിയാക്കാൻ
         });
 
         map.on('locationfound', function(e) {
@@ -268,8 +313,9 @@
                 if (isFollowingUser) map.setView(e.latlng, 18);
             }
 
-            if (e.heading) {
-                updateHeading(e.heading);
+            // GPS വഴി ലഭിക്കുന്ന ദിശയുണ്ടെങ്കിൽ അത് ഉപയോഗിക്കാൻ (കൂടുതൽ കൃത്യതയ്ക്ക്)
+            if (e.heading !== null && !isNaN(e.heading)) {
+                updateDirection(e.heading);
             }
 
             if (wardLayer) {
